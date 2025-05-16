@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, user-scalable=no, minimum-scale=1.0, maximum-scale=1.0" />
+  <title>3D Character and Free Camera with Music, HDR Background, and Dynamic Light</title>
+  <link rel="icon" href="data:," />
+  <style>
+    body {
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+    }
+
+    #scene-container {
+      flex: 1;
+    }
+
+    footer {
+      background-color: #ebf1f1;
+      color: #292929;
+      text-align: center;
+      padding: 10px;
+    }
+
+    footer h1 {
+      font-family: Arial, sans-serif;
+      font-weight: bold;
+      font-size: 1.5rem;
+      margin: 5px 0;
+    }
+
+    footer p {
+      font-family: Arial, sans-serif;
+      margin: 5px 0;
+    }
+  </style>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.158.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.158.0/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+
+<body>
+  <div id="scene-container"></div>
+
+  <footer>
+    <h1>Escena 3D: Personaje y Cámara Libre</h1>
+    <p>Presionar 1 a 5 para cambiar animación:</p>
+    <p>1 - Caminar | 2 - Correr | 3 - Saltar | 4 - Bailar | 5 - Atacar</p>
+  </footer>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import Stats from 'three/addons/libs/stats.module.js';
+    import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+    import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+    import * as CANNON from 'https://cdn.skypack.dev/cannon-es';
+
+    let camera, scene, renderer, stats, mixer, character, pointLight;
+    let currentAction;
+    const animationActions = {};
+    const clock = new THREE.Clock();
+    const keys = {};
+    const cameraSpeed = 50;
+    const rotationSpeed = 3;
+    let cameraRotation = { x: 0, y: 0 };
+    let isMouseDown = false;
+    const objetosFisicos = [];
+    let world;
+
+    init();
+
+    function init() {
+      const container = document.getElementById('scene-container');
+
+      // ✅ Inicializar mundo físico aquí
+      world = new CANNON.World({
+        gravity: new CANNON.Vec3(0, -9.82, 0),
+      });
+
+      camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 2000);
+      camera.position.set(0, 150, 500);
+      scene = new THREE.Scene();
+      scene.fog = new THREE.FogExp2(0xa0a0a0, 0.002);
+
+      const rgbeLoader = new RGBELoader();
+      rgbeLoader.load('models/rgbe/medieval_cafe_4k.hdr', (texture) => {
+        texture.mapping = THREE.EquirectangularReflectionMapping;
+        scene.background = texture;
+        scene.environment = texture;
+        addBackgroundMusic('models/rgbe/Música Navideña Lofi.mp3');
+      });
+
+      scene.add(new THREE.HemisphereLight(0xffffff, 0x444444, 1).position.set(0, 200, 0));
+      const dirLight = new THREE.DirectionalLight(0xffffff, 2);
+      dirLight.position.set(0, 200, 100);
+      dirLight.castShadow = true;
+      scene.add(dirLight);
+
+      pointLight = new THREE.PointLight(0x0000ff, 3, 1000);
+      pointLight.castShadow = true;
+      scene.add(pointLight);
+
+      const textureLoader = new THREE.TextureLoader();
+      const floorTexture = textureLoader.load('models/textures/floor.jpg');
+      floorTexture.wrapS = floorTexture.wrapT = THREE.RepeatWrapping;
+      floorTexture.repeat.set(20, 20);
+
+      const floorMaterial = new THREE.MeshStandardMaterial({ map: floorTexture });
+      const floorGeometry = new THREE.PlaneGeometry(2000, 2000);
+      const floorMesh = new THREE.Mesh(floorGeometry, floorMaterial);
+      floorMesh.rotation.x = -Math.PI / 2;
+      floorMesh.receiveShadow = true;
+      scene.add(floorMesh);
+
+      const groundBody = new CANNON.Body({
+        type: CANNON.Body.STATIC,
+        shape: new CANNON.Plane(),
+      });
+      groundBody.quaternion.setFromEuler(-Math.PI / 2, 0, 0);
+      world.addBody(groundBody);
+
+      const animationFiles = [
+        { name: 'Walking', path: 'models/fbx/Walking.fbx' },
+        { name: 'Running', path: 'models/fbx/Run.fbx' },
+        { name: 'Jump', path: 'models/fbx/Jump.fbx' },
+        { name: 'Dance', path: 'models/fbx/Dance.fbx' },
+        { name: 'Shoot', path: 'models/fbx/Atack.fbx' }
+      ];
+
+      const loader = new FBXLoader();
+      loader.load(animationFiles[0].path, (object) => {
+        character = object;
+        mixer = new THREE.AnimationMixer(character);
+
+        character.traverse((child) => {
+          if (child.isMesh) {
+            child.castShadow = true;
+            child.receiveShadow = true;
+          }
+        });
+
+        scene.add(character);
+
+        const animLoader = new FBXLoader();
+        let loaded = 0;
+        animationFiles.forEach(({ name, path }) => {
+          animLoader.load(path, (anim) => {
+            anim.animations[0].tracks = anim.animations[0].tracks.filter(t =>
+              !t.name.toLowerCase().includes('position')
+            );
+            const action = mixer.clipAction(anim.animations[0]);
+            animationActions[name] = action;
+
+            if (name === 'Walking') {
+              currentAction = action;
+              currentAction.play();
+              currentAction.paused = true;
+            }
+
+            if (++loaded === animationFiles.length) {
+              console.log("Todas las animaciones cargadas.");
+            }
+          });
+        });
+      });
+
+      const modelosConFisica = [
+        { name: 'House', file: 'models/fbx/House.fbx', shape: new CANNON.Box(new CANNON.Vec3(100, 100, 100)), pos: [300, 50, -200] },
+        { name: 'Plant', file: 'models/fbx/Plant.fbx', shape: new CANNON.Cylinder(10, 10, 30, 8), pos: [-100, 30, -150] },
+        { name: 'Sword', file: 'models/fbx/Sword.fbx', shape: new CANNON.Box(new CANNON.Vec3(5, 30, 5)), pos: [0, 60, 200] },
+        { name: 'Tree', file: 'models/fbx/Tree.fbx', shape: new CANNON.Cylinder(20, 40, 150, 8), pos: [200, 75, 150] },
+      ];
+
+      const fbxLoader = new FBXLoader();
+
+      modelosConFisica.forEach(({ file, shape, pos }) => {
+        fbxLoader.load(file, (model) => {
+          model.scale.set(0.1, 0.1, 0.1);
+          model.position.set(...pos);
+
+          model.traverse((child) => {
+            if (child.isMesh) {
+              child.castShadow = true;
+              child.receiveShadow = true;
+            }
+          });
+
+          scene.add(model);
+
+          const body = new CANNON.Body({
+            mass: 1,
+            shape,
+            position: new CANNON.Vec3(...pos),
+          });
+
+          world.addBody(body);
+          objetosFisicos.push({ mesh: model, body });
+        });
+      });
+
+      renderer = new THREE.WebGLRenderer({ antialias: true });
+      renderer.setPixelRatio(window.devicePixelRatio);
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.shadowMap.enabled = true;
+      container.appendChild(renderer.domElement);
+
+      stats = new Stats();
+      container.appendChild(stats.dom);
+
+      window.addEventListener('resize', onWindowResize);
+      window.addEventListener('keydown', (event) => {
+        keys[event.key.toLowerCase()] = true;
+        switch (event.key) {
+          case '1': changeAnimation('Walking'); break;
+          case '2': changeAnimation('Running'); break;
+          case '3': changeAnimation('Jump'); break;
+          case '4': changeAnimation('Dance'); break;
+          case '5': changeAnimation('Shoot'); break;
+        }
+      });
+      window.addEventListener('keyup', (event) => (keys[event.key.toLowerCase()] = false));
+      window.addEventListener('mousedown', () => (isMouseDown = true));
+      window.addEventListener('mouseup', () => (isMouseDown = false));
+      window.addEventListener('mousemove', onMouseMove);
+
+      renderer.setAnimationLoop(animate);
+    }
+
+    function onWindowResize() {
+      camera.aspect = window.innerWidth / window.innerHeight;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+    }
+
+    function onMouseMove(event) {
+      if (isMouseDown) {
+        cameraRotation.x -= (event.movementX * rotationSpeed) / 100;
+        cameraRotation.y = THREE.MathUtils.clamp(
+          cameraRotation.y - (event.movementY * rotationSpeed) / 100,
+          -Math.PI / 2 + 0.1,
+          Math.PI / 2 - 0.1
+        );
+      }
+    }
+
+    function animate() {
+      const delta = clock.getDelta();
+      if (mixer) mixer.update(delta);
+
+      world.fixedStep();
+      for (const obj of objetosFisicos) {
+        obj.mesh.position.copy(obj.body.position);
+        obj.mesh.quaternion.copy(obj.body.quaternion);
+      }
+
+      moveCharacter(delta);
+      moveCamera(delta);
+      updateLightPosition();
+      renderer.render(scene, camera);
+      stats.update();
+    }
+
+    function changeAnimation(name) {
+      if (currentAction && animationActions[name] && currentAction !== animationActions[name]) {
+        currentAction.fadeOut(0.3);
+        currentAction = animationActions[name];
+        currentAction.reset().fadeIn(0.3).play();
+        currentAction.paused = !isCharacterMoving();
+      }
+    }
+
+    function isCharacterMoving() {
+      return keys['w'] || keys['a'] || keys['s'] || keys['d'];
+    }
+
+    function moveCharacter(delta) {
+      if (!character) return;
+
+      const moveDistance = 200 * delta;
+      const rotateAngle = Math.PI * delta;
+      const direction = new THREE.Vector3();
+      let isMoving = false;
+
+      if (keys['w']) {
+        character.getWorldDirection(direction);
+        character.position.addScaledVector(direction, moveDistance);
+        isMoving = true;
+      }
+      if (keys['s']) {
+        character.getWorldDirection(direction);
+        character.position.addScaledVector(direction, -moveDistance);
+        isMoving = true;
+      }
+      if (keys['a']) {
+        character.rotation.y += rotateAngle;
+        isMoving = true;
+      }
+      if (keys['d']) {
+        character.rotation.y -= rotateAngle;
+        isMoving = true;
+      }
+
+      if (currentAction) {
+        currentAction.paused = !isMoving;
+      }
+    }
+
+    function moveCamera(delta) {
+      const forward = new THREE.Vector3(0, 0, -1).applyQuaternion(camera.quaternion);
+      const right = new THREE.Vector3(1, 0, 0).applyQuaternion(camera.quaternion);
+
+      if (keys['arrowup']) camera.position.addScaledVector(forward, cameraSpeed * delta);
+      if (keys['arrowdown']) camera.position.addScaledVector(forward, -cameraSpeed * delta);
+      if (keys['arrowleft']) camera.position.addScaledVector(right, -cameraSpeed * delta);
+      if (keys['arrowright']) camera.position.addScaledVector(right, cameraSpeed * delta);
+
+      const rotationMatrix = new THREE.Matrix4()
+        .makeRotationY(cameraRotation.x)
+        .multiply(new THREE.Matrix4().makeRotationX(cameraRotation.y));
+
+      const forwardDir = new THREE.Vector3(0, 0, -1).applyMatrix4(rotationMatrix);
+      const target = camera.position.clone().add(forwardDir);
+      camera.lookAt(target);
+    }
+
+    function updateLightPosition() {
+      if (character) {
+        pointLight.position.copy(character.position);
+        pointLight.position.y += 200;
+      }
+    }
+
+    function addBackgroundMusic(audioPath) {
+      const listener = new THREE.AudioListener();
+      camera.add(listener);
+      const sound = new THREE.Audio(listener);
+      const audioLoader = new THREE.AudioLoader();
+      audioLoader.load(audioPath, (buffer) => {
+        sound.setBuffer(buffer);
+        sound.setLoop(true);
+        sound.setVolume(0.5);
+        sound.play();
+      });
+    }
+  </script>
+</body>
+
+</html>
