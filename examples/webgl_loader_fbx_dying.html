@@ -30,11 +30,24 @@
       font-weight: bold;
       font-size: 1.5rem;
       margin: 5px 0;
+      color: #0000ff; /* Color acorde a la luz puntual azul */
     }
 
     footer p {
       font-family: Arial, sans-serif;
       margin: 5px 0;
+      color: #292929;
+      line-height: 1.4;
+    }
+
+    footer .team,
+    footer .controls {
+      font-size: 0.9rem;
+    }
+
+    footer .team strong,
+    footer .controls strong {
+      font-weight: bold;
     }
   </style>
 
@@ -52,9 +65,21 @@
   <div id="scene-container"></div>
 
   <footer>
+    <!-- Título de la escena 3D -->
     <h1>Escena 3D: Personaje y Cámara Libre</h1>
-    <p>Presionar 1 a 5 para cambiar animación:</p>
-    <p>1 - Caminar | 2 - Correr | 3 - Saltar | 4 - Bailar | 5 - Atacar</p>
+
+    <!-- Nombres y números de control -->
+    <p class="team">
+      <strong>Integrantes del equipo:</strong><br />
+      Diego Yorel Castelán Silva — 22200717<br />
+      José Héctor Rosales Cabrera — 22201106
+    </p>
+
+    <!-- Mapa de teclas y acciones -->
+    <p class="controls">
+      <strong>Controles:</strong><br />
+      1 — Caminar | 2 — Correr | 3 — Saltar | 4 — Bailar | 5 — Atacar
+    </p>
   </footer>
 
   <script type="module">
